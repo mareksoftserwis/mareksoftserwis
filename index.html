@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>F.E.S. Tracker v37.2.8</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        :root { --primary: #4a90e2; --bg: #f4f7f6; --text: #333; --card: #ffffff; --danger: #ff4757; --work: #2ed573; --break: #f39c12; --vacation: #3498db; --sick: #f1c40f; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin: 0; display: flex; justify-content: center; color: var(--text); user-select: none; touch-action: manipulation; }
+        .container { width: min(95vw, 600px); background: var(--card); padding: 15px; min-height: 100vh; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 0 20px rgba(0,0,0,0.1); box-sizing: border-box; }
+        .status-box { padding: 15px; background: #eef6ff; border-radius: 12px; text-align: center; font-weight: bold; color: var(--primary); border: 1px solid #d0e5ff; min-height: 50px; }
+        .timer-display { text-align: center; font-size: 2.5rem; font-weight: 800; margin: 10px 0; color: var(--primary); font-variant-numeric: tabular-nums; }
+        .chip-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+        .chip-btn { padding: 12px 5px; background: #f8f9fa; border-radius: 15px; text-align: center; border: 2px solid #eee; position: relative; min-height: 85px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: grab; user-select: none; }
+        .chip-btn:active { cursor: grabbing; }
+        .chip-btn.dragging { opacity: 0.5; border: 2px dashed var(--primary); background: #f0f7ff; }
+        .chip-btn.active { border-color: var(--primary); background: #e0f0ff; box-shadow: 0 0 10px rgba(74,144,226,0.3); }
+        .edit-btn { position: absolute; top: 5px; right: 5px; font-size: 1.1rem; padding: 4px; opacity: 0.4; cursor: pointer; z-index: 10; }
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; background: #ddd; padding: 5px; border-radius: 10px; margin-top: 10px; }
+        .day { padding: 10px 2px; background: #fff; border-radius: 5px; text-align: center; font-size: 0.8rem; cursor: pointer; min-height: 38px; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #333; }
+        .day.today { border: 3px solid var(--primary); }
+        .day.has-data { border-bottom: 5px solid #1b944c !important; }
+        .day.status-work { background: var(--work) !important; color: white; }
+        .day.status-off { background: var(--danger) !important; color: white; }
+        .day.status-vacation { background: var(--vacation) !important; color: white; }
+        .day.status-sick { background: var(--sick) !important; color: black; }
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 1000; align-items: center; justify-content: center; padding: 10px; backdrop-filter: blur(5px); }
+        .modal-content { background: white; padding: 20px; border-radius: 20px; width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+        input, select { padding: 12px; border-radius: 10px; border: 1px solid #ccc; font-size: 16px; width: 100%; box-sizing: border-box; }
+        button { padding: 12px; border-radius: 12px; border: none; cursor: pointer; font-weight: bold; font-size: 14px; }
+        .btn-main { background: var(--primary); color: white; padding: 15px; }
+        .btn-sec { background: #e2e8f0; color: #333; }
+        .btn-danger { background: var(--danger); color: white; padding: 15px; }
+        .nfc-status { text-align: center; font-size: 0.8rem; padding: 8px; border-radius: 8px; background: #f0f0f0; color: #666; margin-top: 10px; }
+        .section-title { font-size: 0.95rem; font-weight: bold; color: #555; margin: 15px 0 5px 0; border-left: 3px solid var(--primary); padding-left: 8px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div id="status" class="status-box">SYSTEM BOOTING...</div>
+    <div id="timer" class="timer-display">00:00:00</div>
+    <div id="chipGrid" class="chip-grid"></div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+        <button id="btnAddTask" class="btn-main" onclick="openEdit(null)" style="background:var(--work)">+ Zadanie</button>
+        <button id="btnSchedule" class="btn-sec" onclick="openSettings()">⚙️ Grafik</button>
+    </div>
+    <button id="stopBtn" class="btn-danger" onclick="stopTaskManually()" style="width:100%; margin-top:5px;">⏹ KONIEC PRACY</button>
+    
+    <div class="section-title" id="lblCalendarSection">Kalendarz i statusy dni</div>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:5px;">
+        <button onclick="changeMonth(-1)" class="btn-sec" style="padding: 8px 15px;">◀</button>
+        <h3 id="monthTitle" style="margin:0; font-size: 1.1rem;">Miesiąc</h3>
+        <button onclick="changeMonth(1)" class="btn-sec" style="padding: 8px 15px;">▶</button>
+    </div>
+    <div id="calendar" class="calendar-grid"></div>
+    
+    <div class="section-title" id="lblReportsSection">Generowanie raportów czasu pracy</div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <button id="btnReportDay" class="btn-sec" onclick="showTextReport('dobowy')" style="padding: 12px;">Dziś</button>
+        <button id="btnReportMonth" class="btn-sec" onclick="showTextReport('miesieczny')" style="padding: 12px;">Miesiąc</button>
+    </div>
+    <div id="nfcStatusDisplay" class="nfc-status">📡 NFC oczekuje na inicjalizację...</div>
+</div>
+
+<div id="dayModal" class="modal"><div class="modal-content">
+    <h3 id="lblDayModalTitle">Dzień</h3>
+    <div id="daySummary" style="background:#eef6ff; padding:15px; border-radius:12px;"></div>
+    <select id="dayStatusSelect"></select>
+    <button id="btnSaveDay" class="btn-main" onclick="saveDayStatus()">Zapisz</button>
+    <button id="btnCloseDay" class="btn-sec" onclick="closeModals()">Zamknij</button>
+</div></div>
+
+<div id="settingsModal" class="modal"><div class="modal-content">
+    <h3 id="lblSchTitle">Ustawienia Grafik / Autostart</h3>
+    <div style="background:#eef6ff; padding:12px; border-radius:12px; border:1px solid #bce0ff;">
+        <label id="lblUserCfg" style="font-size:0.85rem; font-weight:bold; color:var(--primary); display:block; margin-bottom:5px;">Użytkownik (do nazwy pliku i wydruku):</label>
+        <input type="text" id="cfgUserName" placeholder="np. Jan Kowalski">
+    </div>
+    <div id="schList" style="display:flex; flex-direction:column; gap:10px;"></div>
+    <button id="btnSaveSch" class="btn-main" onclick="processScheduleSave()">Zapisz i Wyjdź</button>
+    <button id="btnCancelSch" class="btn-sec" onclick="closeModals()">Anuluj</button>
+</div></div>
+
+<div id="editModal" class="modal"><div class="modal-content">
+    <h3 id="lblTaskModalTitle">Zadanie</h3>
+    <label id="lblNfcUid" style="font-size:0.85rem; color:#666; margin-bottom:-5px;">UID Karty NFC (zczytaj zbliżając kartę):</label>
+    <input type="text" id="eId" placeholder="UID karty przydzieli się automatycznie">
+    <input type="text" id="eName" placeholder="Nazwa zadania">
+    <div id="emojiSelected" style="font-size: 3rem; text-align: center; padding:10px;">🏭</div>
+    <div id="emojiContainer" style="display:grid; grid-template-columns:repeat(6,1fr); gap:8px; max-height:200px; overflow-y:auto; padding:10px; background:#f0f0f0; border-radius:10px;"></div>
+    <button id="btnSaveTask" class="btn-main" onclick="saveTask()">Zapisz</button>
+    <button id="delBtn" onclick="deleteTask()" class="btn-danger">Usuń</button>
+    <button id="btnCancelTask" class="btn-sec" onclick="closeModals()">Anuluj</button>
+</div></div>
+
+<div id="reportModal" class="modal"><div class="modal-content">
+    <h3 id="reportTitle">Raport</h3>
+    <div id="reportView" style="background: #f9f9f9; padding: 15px; border-radius: 10px;"></div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+        <button style="background:#ea4335; color:white; padding:12px;" onclick="exportToPDF()">PDF</button>
+        <button style="background:#2e7d32; color:white; padding:12px;" onclick="exportToExcel()">Excel</button>
+    </div>
+    <button id="btnCopyRep" class="btn-main" onclick="copyReport()">Kopiuj Tekst</button>
+    <button id="btnCloseRep" class="btn-sec" onclick="closeModals()">Zamknij</button>
+</div></div>
+
+<div id="sundayModal" class="modal"><div class="modal-content">
+    <h3 style="color:var(--danger); text-align:center; margin:0;">⚠️ ZABEZPIECZENIE NIEDZIELI</h3>
+    <p id="sundayModalText" style="text-align:center; font-weight:500; line-height:1.4;"></p>
+    <button class="btn-main" id="btnSundayConfirm" style="background:var(--work)">TAK, PRACUJĘ</button>
+    <button class="btn-sec" id="btnSundayCancel">NIE, ANULUJ</button>
+</div></div>
+
+<script>
+    var KEY = "FES_TRACKER_PWA_STABLE_V3";
+    var EMOJIS = ['🏭','🏗️','🏢','🏬','🏚️','🏠','🏡','🏣','🏤','🏥','👑','🏛️','⛪','🕋','🧱','🪜','📦','🚛','🚚','🚐','🚗','🚕','🚌','🏎️','🚜','🚲','🛵','🛴','🛹','🚅','✈️','穩','🚢','🚤','⚓','⛽','🛰️','🛠️','🔧','🔨','⚒️','⛏️','🔩','⚙️','⛓️','🪝','🧰','🪚','🪛','📐','📏','💻','🖥️','⌨️','🖱️','🖨️','📱','🔋','🔌','💡','🔦','📡','🔍','🔭','🔬','📊','📈','📉','📋','📂','📁','📓','📒','📔','📕','📖','✏️','🖋️','🖊️','📝','✅','⚠️','🚫','⛔','🛑','⭕','❌','🔥','⚡','💧','❄️','☀️','☁️','🕒','☕','🥪','🍎','🥤','🍕','🍔','🍩'];
+
+    var userLang = 'pl';
+    try {
+        if (navigator && (navigator.language || navigator.browserLanguage)) {
+            userLang = (navigator.language || navigator.browserLanguage).split('-')[0];
+        }
+    } catch(e) { console.log("Language detection bypassed"); }
+
+    var MONTHS = ["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec","Lipiec","Sierpień","Wrzesień","Październik","Listopad","Grudzień"];
+    var DAYS_SHORT = ['Pn','Wt','Śr','Cz','Pt','So','Nd'];
+    var DAYS_FULL = ["Niedziela","Poniedziałek","Wtorek","Środa","Czwartek","Piątek","Sobota"];
+    
+    var TXT = {
+        ready: "F.E.S. GOTOWY", work: "PRACA: ", breakTxt: "☕ PRZERWA", b1: "Śniadanie (15 min)", b2: "Obiad (30 min)",
+        confirmBreak: "Przerwa trwa. Zakończyć pracę?", copied: "Skopiowano!", schLast: "Ostatnie", defTask: "Produkcja",
+        nfc1: "⏳ Inicjalizacja modułu NFC...", nfc2: "🟢 PWA Web NFC: Aktywne. Zbliż kartę...", nfc3: "🔵 Karta: ", 
+        nfc4: "Uruchom aplikację przez localhost lub HTTPS, aby aktywować NFC.", nfc5: "❌ System nie wspiera Web NFC.",
+        confirmSunday: "Uruchamiasz automatyczny start pracy w NIEDZIELĘ. Czy na pewno pracujesz w tym dniu na montażu?",
+        confirmSundayClick: "Dzisiaj jest Niedziela (dzień wolny). Czy na pewno pracujesz dzisiaj na montażu i chcesz uruchomić rejestrację?",
+        confirmRel: function(id, name) { return "Chip (" + id.substring(0,8) + "...) jest przypisany do: \"" + name + "\".\n\nCzy chcesz odpiąć ten chip i przypisać go do nowego zadania?\n(Historia starego zadania zostanie zachowana)."; },
+        btnAddTask: "+ Zadanie", btnSchedule: "⚙️ Grafik", stopBtn: "⏹ KONIEC PRACY", btnReportDay: "Dziś", btnReportMonth: "Miesiąc",
+        lblDayModalTitle: "Dzień", btnSaveDay: "Zapisz", btnCloseDay: "Zamknij", btnCancelSch: "Anuluj", delBtn: "Usuń",
+        lblSchTitle: "Ustawienia Grafik / Autostart", lblTaskModalTitle: "Zadanie", lblNfcUid: "UID Karty NFC (zczytaj zbliżając kartę):",
+        phUid: "UID karty przydzieli się automatycznie", phName: "Nazwa zadania", btnCopyRep: "Kopiuj Tekst",
+        stWork: "💼 Praca", stOff: "🛑 Wolne", stVac: "🏖️ Urlop", stSick: "🤒 L4",
+        schStart: "Start: ", schEnd: "Koniec: ", schAuto: "Autostart: ", schB1: "Przerwa 1: ", schB2: "Przerwa 2: ",
+        repTitle: "Raport: ", colTask: "Zadanie", colTime: "Czas", btnSaveSch: "Zapisz i Wyjdź", btnSaveTask: "Zapisz", btnCancelTask: "Anuluj", btnCloseRep: "Zamknij",
+        lblUserCfg: "Użytkownik (do nazwy pliku i wydruku):", phUser: "np. Jan Kowalski", repEmployee: "Pracownik: ", repSummaryTitle: "=== PODSUMOWANIE CZASU PRACY ===",
+        repDetailedTitle: "=== SZCZEGÓŁOWY CYKL PRAC (DZIEŃ PO DNIU) ===", repNoTasks: "Brak zadań", repNoMonthTasks: "Brak zarejestrowanych prac w tym miesiącu.",
+        repDateCol: "Data", repTimeCol: "Czas pracy", lblCalendarSection: "Kalendarz i statusy dni", lblReportsSection: "Generowanie raportów czasu pracy"
+    };
+
+    if (userLang === 'en') {
+        MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+        DAYS_SHORT = ['Mo','Tu','We','Th','Fr','Sa','Su'];
+        DAYS_FULL = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+        TXT = {
+            ready: "F.E.S. READY", work: "WORK: ", breakTxt: "☕ BREAK", b1: "Breakfast (15 min)", b2: "Lunch (30 min)",
+            confirmBreak: "Break active. End work?", copied: "Copied!", schLast: "Last used", defTask: "Production",
+            nfc1: "⏳ Initializing NFC...", nfc2: "🟢 Web NFC: Active. Scan card...", nfc3: "🔵 Card: ", 
+            nfc4: "Run via localhost/HTTPS to enable NFC.", nfc5: "❌ NFC not supported.",
+            confirmSunday: "You are enabling automatic start for SUNDAY. Are you sure you are working on assembly that day?",
+            confirmSundayClick: "Today is Sunday (day off). Are you sure you are working today on assembly and want to start tracking?",
+            confirmRel: function(id, name) { return "Chip (" + id.substring(0,8) + "...) is assigned to: \"" + name + "\".\n\nReassign chip to new task?\n(Old task history will be kept)."; },
+            btnAddTask: "+ Task", btnSchedule: "⚙️ Schedule", stopBtn: "⏹ END WORK", btnReportDay: "Today", btnReportMonth: "Month",
+            lblDayModalTitle: "Day", btnSaveDay: "Save", btnCloseDay: "Close", btnCancelSch: "Cancel", delBtn: "Delete",
+            lblSchTitle: "Schedule / Autostart Settings", lblTaskModalTitle: "Task", lblNFCUid: "NFC Card UID (scan by holding close):",
+            phUid: "UID will auto-assign", phName: "Task name", btnCopyRep: "Copy Text",
+            stWork: "💼 Work", stOff: "🛑 Off", stVac: "🏖️ Vacation", stSick: "🤒 Sick",
+            schStart: "Start: ", schEnd: "End: ", schAuto: "Autostart: ", schB1: "Break 1: ", schB2: "Break 2: ",
+            repTitle: "Report: ", colTask: "Task", colTime: "Time", btnSaveSch: "Save & Exit", btnSaveTask: "Save", btnCancelTask: "Cancel", btnCloseRep: "Close",
+            lblUserCfg: "User (for filename and printing):", phUser: "e.g. John Doe", repEmployee: "Employee: ", repSummaryTitle: "=== WORK TIME SUMMARY ===",
+            repDetailedTitle: "=== DETAILED DAILY WORK LOG ===", repNoTasks: "No tasks logged", repNoMonthTasks: "No work records found for this month.",
+            repDateCol: "Data", repTimeCol: "Work time", lblCalendarSection: "Calendar & Day Statuses", lblReportsSection: "Work Time Reports"
+        };
+    }
+
+    var state = { tasks: [], history: [], dayStats: {}, activeTask: null, activeBreak: null, lastTaskId: null, schedule: {}, userName: "" };
+    var viewDate = new Date();
+    var editId = null, selectedDayStr = "", currentReportTxt = "", currentReportData = [];
+    var currentReportType = ""; 
+    var currentMonthlyDailyDetails = []; 
+
+    function init() {
+        translateInterface();
+
+        var saved = null;
+        try { saved = localStorage.getItem(KEY); } catch(e){}
+        
+        if(saved) {
+            try { 
+                state = JSON.parse(saved); 
+                if(!state.userName) state.userName = "";
+                if(!state.dayStats) state.dayStats = {};
+            } catch(e) { saved = null; }
+        }
+
+        if(!saved) {
+            state.tasks = [{id:"1", name: TXT.defTask, icon:'🏭'}];
+            state.history = [];
+            state.dayStats = {};
+            state.schedule = {};
+            state.userName = "";
+
+            for(var i=0; i<7; i++) { 
+                var isFriday = (i === 5);
+                state.schedule[i] = { 
+                    en: false, 
+                    s: "07:00", 
+                    e: isFriday ? "12:15" : "15:00", 
+                    p1: "09:00", 
+                    p2: "12:30", 
+                    startTask: "last" 
+                }; 
+            }
+            save();
+        }
+
+        renderTasks(); renderCalendar(); initEmojiPicker();
+        
+        try {
+            setInterval(tick, 1000); 
+            tick();
+        } catch(err) { console.log("Timer crash intercepted: ", err); }
+        
+        setTimeout(initNFC, 2000);
+    }
+
+    function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e){} }
+
+    function triggerSundayModal(messageText, onConfirmCallback) {
+        var modal = document.getElementById('sundayModal');
+        var text = document.getElementById('sundayModalText');
+        if(!modal || !text) return;
+
+        text.innerText = messageText;
+        modal.style.display = 'flex';
+
+        document.getElementById('btnSundayConfirm').onclick = function() {
+            modal.style.display = 'none';
+            if(onConfirmCallback) onConfirmCallback();
+        };
+
+        document.getElementById('btnSundayCancel').onclick = function() {
+            modal.style.display = 'none';
+        };
+    }
+
+    function tick() {
+        var now = new Date();
+        var time = now.getHours().toString().padStart(2,'0') + ":" + now.getMinutes().toString().padStart(2,'0');
+        var sch = state.schedule[now.getDay()];
+        var todayStr = getTodayStr(now);
+        var stat = state.dayStats[todayStr] || (now.getDay() === 0 ? "off" : "work");
+
+        if(stat === "work" && sch && sch.en) {
+            if(time === sch.s && !state.activeTask && !state.activeBreak) {
+                var defId = state.tasks[0] ? state.tasks[0].id : "1";
+                startTaskDirectly(sch.startTask === "last" ? (state.lastTaskId || defId) : sch.startTask);
+            }
+            if((state.activeTask || state.activeBreak) && time >= sch.e && sch.e !== "") { state.activeBreak = null; stopTask(); }
+            handleAutoBreak(time, sch.p1, 1, 15);
+            handleAutoBreak(time, sch.p2, 2, 30);
+        }
+        updateUI();
+    }
+
+    function handleAutoBreak(nowT, startT, bid, dur) {
+        if(!startT) return;
+        var endT = addMins(startT, dur);
+        if(nowT === startT && state.activeBreak !== bid) {
+            if(state.activeTask && state.activeTask.id) { state.lastTaskId = state.activeTask.id.toString(); stopTask(); }
+            state.activeBreak = bid; save(); renderTasks();
+        } else if (state.activeBreak === bid && nowT >= endT) {
+            state.activeBreak = null;
+            if(state.lastTaskId) startTaskDirectly(state.lastTaskId);
+            save(); renderTasks();
+        }
+    }
+
+    function startTask(id) {
+        if (!id) return;
+        var now = new Date();
+        var todayStr = getTodayStr(now);
+        var stat = state.dayStats[todayStr] || (now.getDay() === 0 ? "off" : "work");
+
+        if (stat === "off" && now.getDay() === 0) {
+            triggerSundayModal(TXT.confirmSundayClick, function() {
+                state.dayStats[todayStr] = "work";
+                save();
+                renderCalendar();
+                startTaskDirectly(id);
+            });
+        } else {
+            startTaskDirectly(id);
+        }
+    }
+
+    function startTaskDirectly(id) {
+        var t = state.tasks.find(function(x) { return x.id.toString() === id.toString(); });
+        if(!t || state.activeBreak) return;
+        if(state.activeTask) stopTask();
+        
+        var now = new Date();
+        var todayStr = getTodayStr(now);
+        var startTime = Date.now();
+        var sch = state.schedule[now.getDay()];
+        
+        if (sch && sch.en && sch.s === "07:00") {
+            var hasLogsToday = state.history.some(function(h) { return getTodayStr(new Date(h.start)) === todayStr; });
+            if (!hasLogsToday) {
+                var targetStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 7, 0, 0, 0);
+                if (startTime > targetStart.getTime()) {
+                    startTime = targetStart.getTime();
+                }
+            }
+        }
+
+        state.activeTask = { id: t.id.toString(), name: t.name, start: startTime };
+        state.lastTaskId = t.id.toString();
+        save(); renderTasks();
+    }
+
+    function stopTask() {
+        if(state.activeTask) { state.history.push(Object.assign({}, state.activeTask, {end: Date.now()})); state.activeTask = null; }
+        save(); renderTasks(); renderCalendar();
+    }
+
+    function stopTaskManually() { if(state.activeBreak && !confirm(TXT.confirmBreak)) return; state.activeBreak = null; stopTask(); }
+
+    if (!String.prototype.padStart) {
+        String.prototype.padStart = function padStart(targetLength, padString) {
+            targetLength = targetLength >> 0;
+            padString = String(typeof padString !== 'undefined' ? padString : ' ');
+            if (this.length >= targetLength) { return String(this); }
+            else {
+                targetLength = targetLength - this.length;
+                if (targetLength > padString.length) { padString += padString.repeat(targetLength / padString.length); }
+                return padString.slice(0, targetLength) + String(this);
+            }
+        };
+    }
+
+    function formatTimeDisplay(ms) {
+        if (isNaN(ms) || ms < 0) return "00:00:00";
+        var totalSecs = Math.floor(ms / 1000);
+        var secs = totalSecs % 60;
+        var totalMins = Math.floor(totalSecs / 60);
+        var mins = totalMins % 60;
+        var hours = Math.floor(totalMins / 60);
+        return hours.toString().padStart(2,'0') + ":" + mins.toString().padStart(2,'0') + ":" + secs.toString().padStart(2,'0');
+    }
+
+    function updateUI() {
+        var tEl = document.getElementById('timer'), sEl = document.getElementById('status');
+        if(!tEl || !sEl) return;
+        if(state.activeBreak) { 
+            tEl.innerText = TXT.breakTxt; 
+            sEl.innerText = state.activeBreak === 1 ? TXT.b1 : TXT.b2; 
+        } else if(state.activeTask && state.activeTask.start) { 
+            var diff = Date.now() - state.activeTask.start; 
+            tEl.innerText = formatTimeDisplay(diff); 
+            sEl.innerText = TXT.work + (state.activeTask.name || ""); 
+        } else { 
+            tEl.innerText = "00:00:00"; 
+            sEl.innerText = TXT.ready; 
+        }
+    }
+
+    function renderTasks() {
+        var grid = document.getElementById('chipGrid'); if(!grid) return; grid.innerHTML = '';
+        state.tasks.forEach(function(t) {
+            var isNfc = window.isNaN(t.id);
+            var activeId = (state.activeTask && state.activeTask.id) ? state.activeTask.id.toString() : '';
+            var div = document.createElement('div'); 
+            div.className = "chip-btn " + (activeId === t.id.toString() ? 'active' : '');
+            div.setAttribute('draggable', 'true');
+            div.setAttribute('data-id', t.id.toString());
+            
+            div.innerHTML = '<div class="edit-btn" onclick="openEdit(\'' + t.id + '\', event)">✏️</div><span style="font-size:2rem">' + t.icon + '</span><small>' + t.name + '<br><b style="font-size:0.65rem;color:' + (isNfc?'#2ed573':'#888') + ';">' + (isNfc?'📡 NFC':'ID') + ': ' + t.id.substring(0,8) + '</b></small>';
+            
+            div.onclick = function(e) {
+                if(e.target.classList.contains('edit-btn')) return;
+                startTask(t.id); 
+            }; 
+            grid.appendChild(div);
+        });
+        initDragAndDrop();
+    }
+
+    function initDragAndDrop() {
+        var grid = document.getElementById('chipGrid');
+        if (!grid) return;
+        var items = grid.querySelectorAll('.chip-btn');
+        
+        items.forEach(function(item) {
+            item.addEventListener('dragstart', function(e) {
+                item.classList.add('dragging');
+                e.dataTransfer.setData('text/plain', item.getAttribute('data-id'));
+            });
+
+            item.addEventListener('dragend', function() {
+                item.classList.remove('dragging');
+                reorderTasksFromDOM();
+            });
+
+            item.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                var draggingItem = grid.querySelector('.dragging');
+                if (!draggingItem || draggingItem === item) return;
+                
+                var bounding = item.getBoundingClientRect();
+                var offset = e.clientX - bounding.left - bounding.width / 2;
+                if (offset > 0) { item.after(draggingItem); } else { item.before(draggingItem); }
+            });
+
+            item.addEventListener('touchstart', function(e) {
+                if (e.target.classList.contains('edit-btn')) return;
+                item.classList.add('dragging');
+            }, {passive: true});
+
+            item.addEventListener('touchend', function() {
+                if (item.classList.contains('dragging')) {
+                    item.classList.remove('dragging');
+                    reorderTasksFromDOM();
+                }
+            });
+
+            item.addEventListener('touchmove', function(e) {
+                if (!item.classList.contains('dragging')) return;
+                var touch = e.touches[0];
+                var target = document.elementFromPoint(touch.clientX, touch.clientY);
+                if (!target) return;
+                var closestBtn = target.closest('.chip-btn');
+                if (closestBtn && closestBtn !== item && closestBtn.parentNode === grid) {
+                    var bounding = closestBtn.getBoundingClientRect();
+                    var offset = touch.clientX - bounding.left - bounding.width / 2;
+                    if (offset > 0) { closestBtn.after(item); } else { closestBtn.before(item); }
+                }
+            }, {passive: true});
+        });
+    }
+
+    function reorderTasksFromDOM() {
+        var grid = document.getElementById('chipGrid'); if(!grid) return;
+        var currentIds = Array.from(grid.querySelectorAll('.chip-btn')).map(function(el) { return el.getAttribute('data-id'); });
+        var newTasks = [];
+        currentIds.forEach(function(id) {
+            var found = state.tasks.find(function(x) { return x.id.toString() === id; });
+            if (found) newTasks.push(found);
+        });
+        state.tasks = newTasks; save();
+    }
+
+    function renderCalendar() {
+        var cal = document.getElementById('calendar'); if(!cal) return; cal.innerHTML = '';
+        document.getElementById('monthTitle').innerText = MONTHS[viewDate.getMonth()] + " " + viewDate.getFullYear();
+        DAYS_SHORT.forEach(function(l) { cal.innerHTML += '<div style="text-align:center;font-weight:bold;font-size:0.7rem;">' + l + '</div>'; });
+        var first = (new Date(viewDate.getFullYear(), viewDate.getMonth(), 1).getDay() + 6) % 7;
+        for(var i=0; i<first; i++) cal.innerHTML += '<div></div>';
+        var days = new Date(viewDate.getFullYear(), viewDate.getMonth()+1, 0).getDate();
+        for(var d=1; d<=days; d++) {
+            var currD = new Date(viewDate.getFullYear(), viewDate.getMonth(), d);
+            var dStr = getTodayStr(currD);
+            
+            var stat = state.dayStats[dStr] || (currD.getDay() === 0 ? "off" : "work");
+            var hasData = state.history.some(function(h) { return getTodayStr(new Date(h.start)) === dStr; });
+            
+            var div = document.createElement('div');
+            div.className = "day status-" + stat + (dStr === getTodayStr(new Date()) ? ' today' : '') + (hasData ? ' has-data' : '');
+            div.innerText = d; 
+            
+            (function(str) { div.onclick = function() { openDayModal(str); }; })(dStr);
+            cal.appendChild(div);
+        }
+    }
+
+    function openSettings() {
+        document.getElementById('cfgUserName').value = state.userName || "";
+        var list = document.getElementById('schList'); list.innerHTML = '';
+        [1,2,3,4,5,6,0].forEach(function(i) {
+            var s = state.schedule[i];
+            var tOpts = '<option value="last">' + TXT.schLast + '</option>' + state.tasks.map(function(t) { return '<option value="' + t.id + '">' + t.icon + ' ' + t.name + '</option>'; }).join('');
+            list.innerHTML += '<div style="background:#f8f9fa; padding:10px; border-radius:10px; border:1px solid #ddd;">' +
+                '<div style="display:flex; justify-content:space-between;"><b>' + DAYS_FULL[i] + '</b> <input type="checkbox" id="en' + i + '" ' + (s.en?'checked':'') + ' style="width:20px"></div>' +
+                '<div style="display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-top:5px;"><small>' + TXT.schStart + '<input type="time" id="s' + i + '" value="' + s.s + '"></small><small>' + TXT.schEnd + '<input type="time" id="e' + i + '" value="' + s.e + '"></small></div>' +
+                '<div style="margin-top:5px;"><small>' + TXT.schAuto + '</small><select id="stask' + i + '">' + tOpts + '</select></div>' +
+                '<div style="display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-top:5px; border-top:1px solid #eee; padding-top:5px;">' +
+                    '<small>' + TXT.schB1 + '<input type="time" id="p1' + i + '" value="' + s.p1 + '"></small><small>' + TXT.schB2 + '<input type="time" id="p2' + i + '" value="' + s.p2 + '"></small>' +
+                '</div></div>';
+            setTimeout(function() { if(document.getElementById('stask'+i)) document.getElementById('stask'+i).value = s.startTask; }, 0);
+        });
+        document.getElementById('settingsModal').style.display = 'flex';
+    }
+
+    function processScheduleSave() {
+        var sundayChecked = document.getElementById('en0').checked;
+        
+        if (sundayChecked) {
+            closeModals(); 
+            triggerSundayModal(TXT.confirmSunday, function() {
+                var nextSunday = new Date();
+                nextSunday.setDate(nextSunday.getDate() + (7 - nextSunday.getDay()) % 7);
+                state.dayStats[getTodayStr(nextSunday)] = "work";
+                
+                executeScheduleSave();
+                renderCalendar();
+            });
+        } else {
+            executeScheduleSave();
+        }
+    }
+
+    function executeScheduleSave() {
+        state.userName = document.getElementById('cfgUserName').value.trim();
+        for(var i=0; i<7; i++) { 
+            state.schedule[i] = { 
+                en: document.getElementById('en'+i).checked, 
+                s: document.getElementById('s'+i).value, 
+                e: document.getElementById('e'+i).value, 
+                p1: document.getElementById('p1'+i).value, 
+                p2: document.getElementById('p2'+i).value, 
+                startTask: document.getElementById('stask'+i).value 
+            }; 
+        }
+        save(); 
+        closeModals();
+    }
+
+    function openEdit(id, ev) { 
+        if(ev) ev.stopPropagation(); 
+        editId = id ? id.toString() : null; 
+        var idInput = document.getElementById('eId');
+        if(id) { 
+            var t = state.tasks.find(function(x) { return x.id.toString() === id.toString(); }); 
+            idInput.value = t.id; idInput.disabled = true;
+            document.getElementById('eName').value = t.name; 
+            document.getElementById('emojiSelected').innerText = t.icon; 
+        } else { 
+            idInput.value = ''; idInput.disabled = false;
+            document.getElementById('eName').value = ''; 
+            document.getElementById('emojiSelected').innerText = '🏭'; 
+        } 
+        document.getElementById('editModal').style.display = 'flex'; 
+    }
+
+    function saveTask() { 
+        var rawId = document.getElementById('eId').value.trim();
+        var customId = rawId !== "" ? rawId.toString() : String(Date.now());
+        var name = document.getElementById('eName').value || TXT.defTask; 
+        var icon = document.getElementById('emojiSelected').innerText; 
+        
+        if(editId) { 
+            var t = state.tasks.find(function(x) { return x.id.toString() === editId.toString(); }); 
+            if(t) { t.name = name; t.icon = icon; }
+        } else { 
+            var existingTask = state.tasks.find(function(x) { return x.id.toString() === customId.toString(); });
+            if (existingTask) {
+                var confirmRelease = confirm(TXT.confirmRel(customId, existingTask.name));
+                if (confirmRelease) { existingTask.id = "arch_" + Date.now() + "_" + Math.floor(Math.random()*1000); } else { return; }
+            }
+            state.tasks.push({id: customId, name: name, icon: icon}); 
+        } 
+        save(); renderTasks(); closeModals(); 
+    }
+    
+    function deleteTask() { if(editId) { state.tasks = state.tasks.filter(function(x) { return x.id.toString() !== editId.toString(); }); save(); renderTasks(); closeModals(); } }
+    function initEmojiPicker() { var container = document.getElementById('emojiContainer'); container.innerHTML = EMOJIS.map(function(e) { return '<div style="font-size:1.8rem; cursor:pointer; text-align:center;" onclick="document.getElementById(\'emojiSelected\').innerText=\'' + e + '\'">' + e + '</div>'; }).join(''); }
+
+    function processAndSmoothLogs(rawLogs) {
+        if(rawLogs.length === 0) return [];
+        
+        var processed = rawLogs.map(function(l) {
+            return { name: l.name, start: l.start, end: l.end || Date.now() };
+        }).sort(function(a, b) { return a.start - b.start; });
+
+        var lastLog = processed[processed.length - 1];
+        var lastEndDate = new Date(lastLog.end);
+        var sch = state.schedule[lastEndDate.getDay()];
+        if (sch && sch.e) {
+            var schParts = sch.e.split(':').map(Number);
+            var schEndMs = new Date(lastEndDate.getFullYear(), lastEndDate.getMonth(), lastEndDate.getDate(), schParts[0], schParts[1], 0, 0).getTime();
+            if (lastLog.end < schEndMs && (schEndMs - lastLog.end) <= 30 * 60 * 1000) { lastLog.end = schEndMs; }
+        }
+
+        var finalLogs = [];
+        for (var i = 0; i < processed.length; i++) {
+            var current = processed[i];
+            var durationMin = (current.end - current.start) / 60000;
+            
+            if (durationMin < 10) {
+                var distributeMs = current.end - current.start;
+                if (i > 0 && i < processed.length - 1) {
+                    var half = Math.floor(distributeMs / 2);
+                    processed[i-1].end += half;
+                    processed[i+1].start -= (distributeMs - half);
+                } else if (i > 0) {
+                    processed[i-1].end += distributeMs;
+                } else if (i < processed.length - 1) {
+                    processed[i+1].start -= distributeMs;
+                }
+            } else { finalLogs.push(current); }
+        }
+
+        finalLogs.forEach(function(l) {
+            var actualMin = (l.end - l.start) / 60000;
+            var roundedMin = actualMin;
+            
+            if (actualMin >= 10 && actualMin < 15) { roundedMin = 15; } else {
+                roundedMin = Math.round(actualMin / 15) * 15;
+                if (roundedMin === 0 && actualMin > 0) roundedMin = 15;
+            }
+            l.calculatedMs = roundedMin * 60 * 1000;
+        });
+
+        return finalLogs;
+    }
+
+    function showTextReport(type) {
+        currentReportType = type; 
+        var logs = state.history || []; 
+        var title = type === 'dobowy' ? getTodayStr(new Date()) : MONTHS[viewDate.getMonth()] + " " + viewDate.getFullYear();
+        
+        if(type === 'dobowy') {
+            logs = logs.filter(function(h) { return getTodayStr(new Date(h.start)) === title; });
+        } else {
+            logs = logs.filter(function(h) { 
+                var d = new Date(h.start);
+                return d.getMonth() === viewDate.getMonth() && d.getFullYear() === viewDate.getFullYear(); 
+            });
+        }
+
+        var summary = {}; var total = 0;
+        
+        if (type === 'dobowy') {
+            var smoothed = processAndSmoothLogs(logs);
+            smoothed.forEach(function(l) {
+                summary[l.name] = (summary[l.name] || 0) + l.calculatedMs;
+                total += l.calculatedMs;
+            });
+        } else {
+            var daysMap = {};
+            logs.forEach(function(l) {
+                var dKey = getTodayStr(new Date(l.start));
+                if (!daysMap[dKey]) daysMap[dKey] = [];
+                daysMap[dKey].push(l);
+            });
+            Object.keys(daysMap).forEach(function(dKey) {
+                var smoothedDay = processAndSmoothLogs(daysMap[dKey]);
+                smoothedDay.forEach(function(l) {
+                    summary[l.name] = (summary[l.name] || 0) + l.calculatedMs;
+                    total += l.calculatedMs;
+                });
+            });
+        }
+        
+        currentReportData = []; 
+        var html = '';
+        if (state.userName) { html += '<p id="reportUserHeader" style="margin:0 0 10px 0; font-weight:bold; color:#4a90e2;">' + TXT.repEmployee + state.userName + '</p>'; }
+        
+        html += '<p style="margin:5px 0; font-weight:bold; border-bottom:1px solid #ddd; padding-bottom:3px;">' + TXT.repSummaryTitle.replace(/===/g, '') + ':</p><ul>';
+        var keys = Object.keys(summary);
+        for(var k=0; k<keys.length; k++) {
+            var n = keys[k]; var t = summary[n]; var s = formatMs(t); 
+            html += '<li>' + n + ': <b>' + s + '</b></li>'; 
+            currentReportData.push([n, s]);
+        }
+        if(keys.length === 0) html += '<li>' + TXT.repNoTasks + '</li>';
+        
+        html += '</ul><p style="margin-bottom:15px;"><b>RAZEM W OKRESIE: ' + formatMs(total) + '</b></p>';
+        currentReportData.push(["RAZEM", formatMs(total)]);
+
+        var userPrefix = state.userName ? TXT.repEmployee + state.userName + "\n" : "";
+        currentReportTxt = userPrefix + TXT.repTitle + title + "\n\n" + TXT.repSummaryTitle + "\n" + currentReportData.map(function(r) { return r.join(": "); }).join("\n");
+
+        currentMonthlyDailyDetails = [];
+        if(type === 'miesieczny') {
+            html += '<p style="margin:15px 0 5px 0; font-weight:bold; border-bottom:1px solid #ddd; padding-bottom:3px;">' + TXT.repDetailedTitle.replace(/===/g, '') + ':</p>';
+            currentReportTxt += "\n\n" + TXT.repDetailedTitle;
+            
+            var dailyGroups = {};
+            var daysMap = {};
+            logs.forEach(function(l) {
+                var dKey = getTodayStr(new Date(l.start));
+                if (!daysMap[dKey]) daysMap[dKey] = [];
+                daysMap[dKey].push(l);
+            });
+
+            Object.keys(daysMap).forEach(function(dKey) {
+                var smoothedDay = processAndSmoothLogs(daysMap[dKey]);
+                if(!dailyGroups[dKey]) dailyGroups[dKey] = {};
+                smoothedDay.forEach(function(l) { dailyGroups[dKey][l.name] = (dailyGroups[dKey][l.name] || 0) + l.calculatedMs; });
+            });
+
+            var sortedDays = Object.keys(dailyGroups).sort();
+            if(sortedDays.length === 0) {
+                html += '<p style="font-size:0.9rem; color:#888; font-style:italic;">' + TXT.repNoMonthTasks + '</p>';
+            } else {
+                sortedDays.forEach(function(dayStr) {
+                    html += '<div style="margin-top:8px; font-size:0.9rem;"><b style="color:#2c3e50;">📅 ' + dayStr + '</b><ul style="margin:2px 0 10px 0; padding-left:20px;">';
+                    currentReportTxt += "\n📅 " + dayStr + ":";
+                    
+                    Object.keys(dailyGroups[dayStr]).forEach(function(taskName) {
+                        var ms = dailyGroups[dayStr][taskName];
+                        var formatted = formatMs(ms);
+                        html += '<li>' + taskName + ': ' + formatted + '</li>';
+                        currentReportTxt += "\n  - " + taskName + ": " + formatted;
+                        currentMonthlyDailyDetails.push([dayStr, taskName, formatted]);
+                    });
+                    html += '</ul></div>';
+                });
+            }
+        }
+
+        document.getElementById('reportView').innerHTML = html; 
+        document.getElementById('reportTitle').innerText = TXT.repTitle + title; 
+        document.getElementById('reportModal').style.display = 'flex';
+    }
+
+    function getDynamicFilename() {
+        var prefix = "";
+        if (state.userName && state.userName.trim() !== "") { prefix = state.userName.trim().replace(/\s+/g, '_') + "_"; }
+        if (currentReportType === 'dobowy') { return prefix + "FES_" + getTodayStr(new Date()); } else {
+            var mName = ["Styczen","Luty","Marzec","Kwiecien","Maj","Czerwiec","Lipiec","Sierpieen","Wrzesien","Pazdziernik","Listopad","Grudzien"][viewDate.getMonth()];
+            return prefix + "FES_" + mName + "_" + viewDate.getFullYear();
+        }
+    }
+
+    function exportToPDF() { 
+        try {
+            var { jsPDF } = window.jspdf; var doc = new jsPDF(); 
+            var headerText = document.getElementById('reportTitle').innerText;
+            if(state.userName) { headerText += " | " + TXT.repEmployee + state.userName; }
+            doc.text(headerText, 10, 10); 
+            doc.text(TXT.repSummaryTitle.replace(/===/g, '') + ":", 10, 20);
+            doc.autoTable({ head: [[TXT.colTask, TXT.colTime]], body: currentReportData, startY: 23 }); 
+            
+            if(currentReportType === 'miesieczny' && currentMonthlyDailyDetails.length > 0) {
+                var nextY = doc.lastAutoTable.finalY + 15;
+                doc.text(TXT.repDetailedTitle.replace(/===/g, '') + ":", 10, nextY);
+                doc.autoTable({ head: [[TXT.repDateCol, TXT.colTask, TXT.repTimeCol]], body: currentMonthlyDailyDetails, startY: nextY + 3 });
+            }
+            doc.save(getDynamicFilename() + ".pdf"); 
+        } catch(e) { alert("PDF export error"); }
+    }
+    
+    function exportToExcel() { 
+        try {
+            var finalData = [];
+            if (state.userName) { finalData.push([TXT.repEmployee, state.userName]); finalData.push([]); }
+            finalData.push([TXT.repSummaryTitle.replace(/===/g, '')]);
+            finalData.push([TXT.colTask, TXT.colTime]);
+            finalData = finalData.concat(currentReportData);
+            
+            if(currentReportType === 'miesieczny' && currentMonthlyDailyDetails.length > 0) {
+                finalData.push([]); finalData.push([]);
+                finalData.push([TXT.repDetailedTitle.replace(/===/g, '')]);
+                finalData.push([TXT.repDateCol, TXT.colTask, TXT.repTimeCol]);
+                finalData = finalData.concat(currentMonthlyDailyDetails);
+            }
+
+            var ws = XLSX.utils.aoa_to_sheet(finalData); 
+            var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Raport"); 
+            XLSX.writeFile(wb, getDynamicFilename() + ".xlsx"); 
+        } catch(e) { alert("Excel export error"); }
+    }
+
+    function openDayModal(d) { selectedDayStr = d; document.getElementById('dayModal').style.display = 'flex'; }
+    function saveDayStatus() { state.dayStats[selectedDayStr] = document.getElementById('dayStatusSelect').value; save(); renderCalendar(); closeModals(); }
+    function closeModals() { document.querySelectorAll('.modal').forEach(function(m) { m.style.display = 'none'; }); }
+    
+    function getTodayStr(d) { 
+        var mm = (d.getMonth() + 1).toString().padStart(2, '0');
+        var dd = d.getDate().toString().padStart(2, '0');
+        return d.getFullYear() + '-' + mm + '-' + dd; 
+    }
+    
+    function addMins(t, m) { var parts = t.split(':').map(Number); var d = new Date(); d.setHours(parts[0], parts[1]+m); return d.getHours().toString().padStart(2,'0')+":"+d.getMinutes().toString().padStart(2,'0'); }
+    function formatMs(ms) { var h = Math.floor(ms/3600000); var m = Math.floor((ms%3600000)/60000); return h + "h " + m + "m"; }
+    function changeMonth(v) { viewDate.setMonth(viewDate.getMonth()+v); renderCalendar(); }
+    function copyReport() { try { navigator.clipboard.writeText(currentReportTxt); alert(TXT.copied); } catch(e) { alert("Clipboard API error"); } }
+
+    function translateInterface() {
+        var targetIds = [
+            'btnAddTask', 'btnSchedule', 'stopBtn', 'btnReportDay', 'btnReportMonth', 
+            'lblDayModalTitle', 'btnSaveDay', 'btnCloseDay', 'lblSchTitle', 'btnSaveSch', 
+            'btnCancelSch', 'lblTaskModalTitle', 'lblNfcUid', 'btnSaveTask', 'delBtn', 
+            'btnCancelTask', 'btnCopyRep', 'btnCloseRep', 'lblUserCfg', 'lblCalendarSection', 'lblReportsSection'
+        ];
+        targetIds.forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el && TXT[id]) { el.innerText = TXT[id]; }
+        });
+        var eIdInput = document.getElementById('eId'); if (eIdInput) eIdInput.placeholder = TXT.phUid;
+        var eNameInput = document.getElementById('eName'); if (eNameInput) eNameInput.placeholder = TXT.phName;
+        var cfgUserInp = document.getElementById('cfgUserName'); if (cfgUserInp) cfgUserInp.placeholder = TXT.phUser;
+
+        var selectDay = document.getElementById('dayStatusSelect');
+        if (selectDay) {
+            selectDay.innerHTML = '<option value="work">' + TXT.stWork + '</option>' +
+                                  '<option value="off">' + TXT.stOff + '</option>' +
+                                  '<option value="vacation">' + TXT.stVac + '</option>' +
+                                  '<option value="sick">' + TXT.stSick + '</option>';
+        }
+    }
+
+    async function initNFC() {
+        var display = document.getElementById('nfcStatusDisplay');
+        if (window && 'NDEFReader' in window) {
+            try {
+                var ndef = new NDEFReader();
+                if (display) display.innerText = TXT.nfc1;
+                await ndef.scan();
+                if (display) display.innerText = TXT.nfc2;
+                
+                ndef.addEventListener("reading", function(event) {
+                    var serialNumber = event.serialNumber;
+                    if (!serialNumber) return;
+                    var cardUID = serialNumber.toLowerCase();
+                    if (display) display.innerText = TXT.nfc3 + cardUID;
+                    
+                    var idInput = document.getElementById('eId');
+                    var editModal = document.getElementById('editModal');
+                    if (editModal && editModal.style.display === 'flex' && idInput && !idInput.disabled) {
+                        idInput.value = cardUID;
+                        return;
+                    }
+                    if (cardUID === "stop") stopTaskManually(); else startTask(cardUID);
+                    setTimeout(function() { if(display) display.innerText = TXT.nfc2; }, 3000);
+                });
+            } catch (error) { if (display) display.innerText = TXT.nfc4; }
+        } else { if (display) display.innerText = TXT.nfc5; }
+    }
+
+    if (document.readyState === "complete" || document.readyState === "interactive") { setTimeout(init, 1); } else { document.addEventListener("DOMContentLoaded", init); }
+</script>
+</body>
+</html>
